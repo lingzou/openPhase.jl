@@ -1,5 +1,7 @@
-using NonlinearSolve, LinearSolve
+using NonlinearSolve, LinearSolve, LinearAlgebra
 using BenchmarkTools
+using Printf
+using CSV
 
 const N = 48
 const dx = 12.0 / N
@@ -94,4 +96,31 @@ for i = 1 : Nt
   # global prob = remake(prob, u0=u_old, p=pars)
 end
 
-println(u_old[2*N+3 : 3*N+2])
+######################################################################
+# here the 'gold' files are generated
+# vl, vg, alpha, pp, rho_l, rho_g = u_to_sol(u_old)
+# file = open("cell-vars.csv", "w")
+# @printf(file, "%s, %s, %s\n", "x[m]", "alpha[-]", "pressure[Pa]")
+# for i = 1 : N
+#   @printf(file, "%g, %.8e, %.12e\n", (i-0.5) * dx, alpha[i], pp[i])
+# end
+# close(file)
+
+# file = open("edge-vars.csv", "w")
+# @printf(file, "%s, %s, %s\n","x[m]", "vl[m/s]", "vg[m/s]")
+# for i = 1 : N+1
+#   @printf(file, "%g, %.8e, %.8e\n", (i-1) * dx, vl[i], vg[i])
+# end
+# close(file)
+######################################################################
+
+# This is the final results
+vl, vg, alpha, pp, rho_l, rho_g = u_to_sol(u_old)
+# test the final results with 'gold' results
+gold_cell = CSV.read("gold/cell-vars.csv", CSV.Tables.matrix; header=true)
+gold_edge = CSV.read("gold/edge-vars.csv", CSV.Tables.matrix; header=true)
+
+println("norm2 error for alpha = $(norm(alpha - gold_cell[:, 2]))")
+println("norm2 error for p = $(norm(pp - gold_cell[:, 3]))")
+println("norm2 error for vl = $(norm(vl - gold_edge[:, 2]))")
+println("norm2 error for vg = $(norm(vg - gold_edge[:, 3]))")
