@@ -6,6 +6,7 @@ module TF4E1P
 
 export Cell, initialize!, updateSolution!, saveOldSolutions!, makeConnection!, extendConnection!, computeFluxes!
 export IntEdge, pBndryEdge, vBndryEdge
+export assignDOF!
 export mass_eqn, momentum_eqn, mass_eqn!, momentum_eqn!
 export printName
 
@@ -50,6 +51,8 @@ end
 Base.@kwdef mutable struct Cell <: AbstractCell
   name        ::String
   dx          ::Float64
+  alpha_dof   ::UInt32  = 0
+  p_dof       ::UInt32  = 0
   alpha       = 0.0 #::Float64
   p           = 1.0e5 #::Float64
   rho_l       = rho_l_fn(1.0e5)
@@ -80,6 +83,15 @@ function updateSolution!(cell::Cell, alpha, p)
   cell.rho_l, cell.rho_g = rho_l_fn(p), rho_g_fn(p)
 end
 
+function updateSolution!(cell::Cell, u)
+  cell.alpha, cell.p = u[cell.alpha_dof], u[cell.p_dof]
+  cell.rho_l, cell.rho_g = rho_l_fn(cell.p), rho_g_fn(cell.p)
+end
+
+function assignDOF!(cell::Cell, alpha_dof, p_dof)
+  cell.alpha_dof, cell.p_dof = alpha_dof, p_dof
+end
+
 function saveOldSolutions!(cell::Cell)
   # old solutions -> oldold solutions
   # solutions -> old solutions
@@ -95,7 +107,6 @@ function makeConnection!(west_edge::AbstractEdge, cell::Cell, east_edge::Abstrac
   west_edge.e_cell, east_edge.w_cell = cell, cell
 end
 
-# more allocation
 function mass_eqn(cell::Cell, dt, dx)
   res_l = ((1.0 - cell.alpha) * cell.rho_l - (1.0 - cell.alpha_o) * cell.rho_l_o) / dt
   res_g = (cell.alpha * cell.rho_g - cell.alpha_o * cell.rho_g_o) / dt
@@ -106,13 +117,12 @@ function mass_eqn(cell::Cell, dt, dx)
   res_l, res_g
 end
 
-# faster with less allocation
-function mass_eqn!(cell::Cell, dt, dx, res_l, res_g)
-  res_l = ((1.0 - cell.alpha) * cell.rho_l - (1.0 - cell.alpha_o) * cell.rho_l_o) / dt
-  res_g = (cell.alpha * cell.rho_g - cell.alpha_o * cell.rho_g_o) / dt
+function mass_eqn!(cell::Cell, dt, dx, res)
+  res[1] = ((1.0 - cell.alpha) * cell.rho_l - (1.0 - cell.alpha_o) * cell.rho_l_o) / dt
+  res[2] = (cell.alpha * cell.rho_g - cell.alpha_o * cell.rho_g_o) / dt
 
-  res_l += (cell.e_edge.mass_flux_l - cell.w_edge.mass_flux_l) / dx
-  res_g += (cell.e_edge.mass_flux_g - cell.w_edge.mass_flux_g) / dx
+  res[1] += (cell.e_edge.mass_flux_l - cell.w_edge.mass_flux_l) / dx
+  res[2] += (cell.e_edge.mass_flux_g - cell.w_edge.mass_flux_g) / dx
 end
 
 
@@ -121,6 +131,8 @@ end
 """
 Base.@kwdef mutable struct IntEdge <: AbstractEdge
   name        ::String
+  vl_dof      ::UInt32  = 0
+  vg_dof      ::UInt32  = 0
   vl          = 0.0 #::Float64
   vg          = 0.0 #::Float64
   vl_o        = vl
@@ -140,6 +152,10 @@ end
 function initialize!(edge::IntEdge, vl_init, vg_init)
   edge.vl, edge.vl_o, edge.vl_oo = vl_init, vl_init, vl_init
   edge.vg, edge.vg_o, edge.vg_oo = vg_init, vg_init, vg_init
+end
+
+function assignDOF!(edge::IntEdge, vl_dof, vg_dof)
+  edge.vl_dof, edge.vg_dof = vl_dof, vg_dof
 end
 
 function updateSolution!(edge::IntEdge, vl, vg)
@@ -180,16 +196,16 @@ function momentum_eqn(edge::IntEdge, dt, dx)
   res_l, res_g
 end
 
-function momentum_eqn!(edge::IntEdge, dt, dx, res_l, res_g)
-  res_l = (edge.vl - edge.vl_o) / dt
-  res_g = (edge.vg - edge.vg_o) / dt
+function momentum_eqn!(edge::IntEdge, dt, dx, res)
+  res[1] = (edge.vl - edge.vl_o) / dt
+  res[2] = (edge.vg - edge.vg_o) / dt
 
   adv_l = edge.vl / dx * ifelse(edge.vl > 0.0, edge.vl - edge.w_edge.vl, edge.e_edge.vl - edge.vl)
   adv_g = edge.vg / dx * ifelse(edge.vg > 0.0, edge.vg - edge.w_edge.vg, edge.e_edge.vg - edge.vg)
   dp_dx = (edge.e_cell.p - edge.w_cell.p) / dx
 
-  res_l += (adv_l + dp_dx / edge.rho_l_avg - 9.8)
-  res_g += (adv_g + dp_dx / edge.rho_g_avg - 9.8)
+  res[1] += (adv_l + dp_dx / edge.rho_l_avg - 9.8)
+  res[2] += (adv_g + dp_dx / edge.rho_g_avg - 9.8)
 end
 
 """
@@ -197,6 +213,8 @@ end
 """
 Base.@kwdef mutable struct pBndryEdge <: AbstractEdge
   name        ::String
+  vl_dof      ::UInt32  = 0
+  vg_dof      ::UInt32  = 0
   p_bc
   alpha_bc
   vl          = 0.0 #::Float64
@@ -222,6 +240,10 @@ end
 
 function updateSolution!(edge::pBndryEdge, vl, vg)
   edge.vl, edge.vg = vl, vg
+end
+
+function assignDOF!(edge::pBndryEdge, vl_dof, vg_dof)
+  edge.vl_dof, edge.vg_dof = vl_dof, vg_dof
 end
 
 function saveOldSolutions!(edge::pBndryEdge)
@@ -273,9 +295,9 @@ function momentum_eqn(edge::pBndryEdge, dt, dx)
   res_l, res_g
 end
 
-function momentum_eqn!(edge::pBndryEdge, dt, dx, res_l, res_g)
-  res_l = (edge.vl - edge.vl_o) / dt
-  res_g = (edge.vg - edge.vg_o) / dt
+function momentum_eqn!(edge::pBndryEdge, dt, dx, res)
+  res[1] = (edge.vl - edge.vl_o) / dt
+  res[2] = (edge.vg - edge.vg_o) / dt
 
   if (edge.w_cell == nothing)
     adv_l = edge.vl / dx * ifelse(edge.vl > 0.0, 0.0, edge.e_edge.vl - edge.vl)
@@ -287,8 +309,8 @@ function momentum_eqn!(edge::pBndryEdge, dt, dx, res_l, res_g)
     dp_dx = (edge.p_bc - edge.w_cell.p) / dx * 2.0
   end
 
-  res_l += (adv_l + dp_dx / edge.rho_l_avg - 9.8)
-  res_g += (adv_g + dp_dx / edge.rho_g_avg - 9.8)
+  res[1] += (adv_l + dp_dx / edge.rho_l_avg - 9.8)
+  res[2] += (adv_g + dp_dx / edge.rho_g_avg - 9.8)
 end
 
 """
@@ -296,6 +318,8 @@ end
 """
 Base.@kwdef mutable struct vBndryEdge <: AbstractEdge
   name        ::String
+  vl_dof      ::UInt32  = 0
+  vg_dof      ::UInt32  = 0
   vl_bc
   vg_bc
   alpha_bc
@@ -318,6 +342,10 @@ end
 
 function updateSolution!(edge::vBndryEdge, vl, vg)
   edge.vl, edge.vg = vl, vg
+end
+
+function assignDOF!(edge::vBndryEdge, vl_dof, vg_dof)
+  edge.vl_dof, edge.vg_dof = vl_dof, vg_dof
 end
 
 function computeFluxes!(edge::vBndryEdge)
@@ -350,8 +378,8 @@ function momentum_eqn(edge::vBndryEdge, dt, dx)
   edge.vl - edge.vl_bc, edge.vg - edge.vg_bc
 end
 
-function momentum_eqn!(edge::vBndryEdge, dt, dx, res_l, res_g)
-  res_l, res_g = edge.vl - edge.vl_bc, edge.vg - edge.vg_bc
+function momentum_eqn!(edge::vBndryEdge, dt, dx, res)
+  res[1], res[2] = edge.vl - edge.vl_bc, edge.vg - edge.vg_bc
 end
 
 end

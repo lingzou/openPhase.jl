@@ -29,7 +29,7 @@ for i = 1 : N-1
 end
 
 for i = 1 : N
-  cells[i] = Cell(name = string("cell_", i), dx = 0.1)
+  cells[i] = Cell(name = string("cell_", i), dx = dx)
 
   west_edge = (i == 1) ? inlet : int_edges[i-1]
   east_edge = (i == N) ? outlet : int_edges[i]
@@ -102,6 +102,14 @@ extendConnection!.([inlet, outlet])
 # printName(outlet.e_cell)
 
 
+assignDOF!(inlet, 1, 2)
+for i = 1 : N
+  assignDOF!(cells[i], 4*i-1, 4*i)
+end
+for i = 1 : N-1
+  assignDOF!(int_edges[i], 4*i+1, 4*i+2)
+end
+assignDOF!(outlet, 4*N+1, 4*N+2)
 
 
 ###########################################################################
@@ -118,26 +126,30 @@ function tf_4e1p(du, u, pars)
   end
   updateSolution!(outlet, u[4*N+1], u[4*N+2])
 
+  # @time begin
   computeFluxes!(inlet)
   computeFluxes!.(int_edges)
   computeFluxes!(outlet)
+  # end
 
+  # @time begin
   du[1], du[2] = momentum_eqn(inlet, dt, dx)
-  # momentum_eqn!(inlet, dt, dx, du[1], du[2])
-  # momentum_eqn!(inlet, dt, dx, @view du[1:2])
+  # momentum_eqn!(inlet, dt, dx, du[1], du[2]) <- won't work because passing array element won't change its value
+  # momentum_eqn!(inlet, dt, dx, @view du[1:2]) # no significant change, slightly less memory allocations
   for i = 1 : N
     du[4*i-1], du[4*i] = mass_eqn(cells[i], dt, dx)
-    # mass_eqn!(cells[i], dt, dx, du[4*i-1], du[4*i])
-    # mass_eqn!(cells[i], dt, dx, @view du[4*i-1:4*i])
+    # mass_eqn!(cells[i], dt, dx, du[4*i-1], du[4*i]) <- won't work because passing array element won't change its value
+    # mass_eqn!(cells[i], dt, dx, @view du[4*i-1:4*i]) # no significant change, slightly less memory allocations
   end
   for i = 1 : N-1
     du[4*i+1], du[4*i+2] = momentum_eqn(int_edges[i], dt, dx)
-    # momentum_eqn!(int_edges[i], dt, dx, du[4*i+1], du[4*i+2])
-    # momentum_eqn!(int_edges[i], dt, dx, @view du[4*i+1 : 4*i+2])
+    # momentum_eqn!(int_edges[i], dt, dx, du[4*i+1], du[4*i+2]) <- won't work because passing array element won't change its value
+    # momentum_eqn!(int_edges[i], dt, dx, @view du[4*i+1 : 4*i+2]) # no significant change, slightly less memory allocations
   end
   du[4*N+1], du[4*N+2] = momentum_eqn(outlet, dt, dx)
-  # momentum_eqn!(outlet, dt, dx, du[4*N+1], du[4*N+2])
-  # momentum_eqn!(outlet, dt, dx, @view du[4*N+1 : 4*N+2])
+  # momentum_eqn!(outlet, dt, dx, du[4*N+1], du[4*N+2]) <- won't work because passing array element won't change its value
+  # momentum_eqn!(outlet, dt, dx, @view du[4*N+1 : 4*N+2]) # no significant change, slightly less memory allocations
+  # end
 end
 
 
@@ -177,7 +189,8 @@ prob = NonlinearProblem(tf_4e1p, u_old, pars; abstol = 1e-6, reltol = 1e-8)
 
 for i = 1 : Nt
   println("Solving time step: ", i)
-  @time solve(prob, NewtonRaphson()) #; show_trace = Val(true), trace_level = TraceAll(2)))
+  # most expensive function
+  @time solve(prob, NewtonRaphson()) #, show_trace = Val(true), trace_level = TraceAll(2))
   # global pars = u_to_sol(u_old)
   # global prob = remake(prob, p=pars)
 
@@ -185,11 +198,13 @@ for i = 1 : Nt
   # global u_old = sol.u
   # global pars = u_to_sol(u_old)
   # global prob = remake(prob, u0=u_old, p=pars)
+  # cheap functions
   saveOldSolutions!.(cells)
   saveOldSolutions!.(int_edges)
   # saveOldSolutions!(inlet)
   saveOldSolutions!(outlet)
 
+  # cheap functions
   u_old[1], u_old[2] = vl_in, 0.0
   for i = 1 : N
     u_old[4*i-1], u_old[4*i] = cells[i].alpha, cells[i].p
